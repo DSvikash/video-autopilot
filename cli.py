@@ -3,20 +3,56 @@ import click
 from pathlib import Path
 from src.pipeline import VideoAutopilotPipeline
 from src.queue.topic_queue import TopicQueue
+from src.studio.scriptwriter import DocumentaryScriptwriter
+from src.studio.studio_composer import StudioComposer
 
 @click.group()
 def cli():
-    """Video Autopilot: Hinglish Tech Shorts & Long-Form Video Automation Pipeline"""
+    """Video Autopilot: High-Value Long-Form Tech Documentaries & YouTube Automation"""
     pass
 
+@cli.command("documentary")
+@click.option("--topic", "-t", required=True, help="Topic for the in-depth tech documentary")
+@click.option("--upload/--no-upload", default=True, show_default=True, help="Whether to upload to YouTube")
+def documentary(topic: str, upload: bool):
+    """
+    Produce a serious, high-production 1080p tech documentary
+    modeled on top tech creators (Vaibhav Sisinty / Matt Wolfe).
+    Features: Multi-chapter breakdowns, sleek dark-mode slide decks,
+    expert narration, verified benchmarks, and automatic YouTube timestamps.
+    """
+    click.echo(f"🎬 Initializing Studio Documentary Production for: '{topic}'")
+    writer = DocumentaryScriptwriter()
+    script = writer.write_script(topic)
+    
+    click.echo(f"📋 Script Prepared: '{script.title}' ({len(script.chapters)} Chapters)")
+    composer = StudioComposer()
+    result = composer.produce_documentary(script, upload_to_youtube=upload)
+    
+    click.echo("\n" + "=" * 60)
+    click.echo("✅ High-Production Documentary Production Complete!")
+    click.echo(f"📁 Video Path: {result['video_path']}")
+    click.echo(f"⏱️ Duration: {result['duration']:.1f}s")
+    click.echo(f"🎬 Title: {result['title']}")
+    click.echo("\n📌 YouTube Timestamps:")
+    for ch in result["chapters"]:
+        click.echo(f"  {ch['timestamp_str']} - {ch['title']}")
+        
+    if result.get("upload"):
+        up = result["upload"]
+        click.echo(f"\n📡 YouTube Status: {up.get('status')}")
+        if up.get("url"):
+            click.echo(f"🔗 YouTube URL: {up.get('url')}")
+    click.echo("=" * 60)
+
 @cli.command()
-@click.option("--topic", "-t", required=True, help="Topic for the video (e.g. Best 5G phone under 15,000)")
+@click.option("--topic", "-t", required=True, help="Topic for the video")
 @click.option(
     "--genre", "-g",
     type=click.Choice(["explainer", "action", "drama", "thriller", "motivational", "mystery", "comedy", "Let the director decide"]),
     default="explainer",
     show_default=True,
-    help="Narrative genre from Hinglish Director workflow"
+    help="Narrative genre"
 )
 @click.option(
     "--format", "-f",
@@ -24,7 +60,7 @@ def cli():
     type=click.Choice(["short", "long"]),
     default="short",
     show_default=True,
-    help="Video format: short (9:16 vertical) or long (16:9 horizontal)"
+    help="Video format: short (9:16) or long (16:9)"
 )
 @click.option(
     "--upload/--no-upload",
@@ -34,13 +70,12 @@ def cli():
 )
 def generate(topic: str, genre: str, format_type: str, upload: bool):
     """Generate a single video autonomously with Director scripting & Ken Burns motion."""
-    click.echo(f"🚀 Starting Hinglish Director Pipeline for: '{topic}' [Genre: {genre}, Format: {format_type.upper()}]")
+    click.echo(f"🚀 Starting Video Pipeline for: '{topic}' [Genre: {genre}, Format: {format_type.upper()}]")
     pipeline = VideoAutopilotPipeline()
     result = pipeline.run(topic=topic, format_type=format_type, genre=genre, upload_to_youtube=upload)
     click.echo("✅ Production Complete!")
     click.echo(f"📁 Video Path: {result['video_path']}")
     click.echo(f"🎬 Title: {result['title']}")
-    click.echo(f"🏷️ Hook Overlay: {result.get('hook_overlay')}")
     if result.get("upload"):
         up = result["upload"]
         click.echo(f"📡 YouTube Status: {up.get('status')}")
