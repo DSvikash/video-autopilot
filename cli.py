@@ -2,14 +2,22 @@ import json
 import click
 from pathlib import Path
 from src.pipeline import VideoAutopilotPipeline
+from src.queue.topic_queue import TopicQueue
 
 @click.group()
 def cli():
-    """Video Autopilot: Autonomous End-to-End AI Video Production & YouTube Publisher"""
+    """Video Autopilot: Hinglish Tech Shorts & Long-Form Video Automation Pipeline"""
     pass
 
 @cli.command()
-@click.option("--topic", "-t", required=True, help="Topic for the video")
+@click.option("--topic", "-t", required=True, help="Topic for the video (e.g. Best 5G phone under 15,000)")
+@click.option(
+    "--genre", "-g",
+    type=click.Choice(["explainer", "action", "drama", "thriller", "motivational", "mystery", "comedy", "Let the director decide"]),
+    default="explainer",
+    show_default=True,
+    help="Narrative genre from Hinglish Director workflow"
+)
 @click.option(
     "--format", "-f",
     "format_type",
@@ -24,43 +32,76 @@ def cli():
     show_default=True,
     help="Whether to upload to YouTube automatically"
 )
-def generate(topic: str, format_type: str, upload: bool):
-    """Generate a single video autonomously from a topic."""
-    click.echo(f"🚀 Starting Video Autopilot for topic: '{topic}' [{format_type.upper()}]")
+def generate(topic: str, genre: str, format_type: str, upload: bool):
+    """Generate a single video autonomously with Director scripting & Ken Burns motion."""
+    click.echo(f"🚀 Starting Hinglish Director Pipeline for: '{topic}' [Genre: {genre}, Format: {format_type.upper()}]")
     pipeline = VideoAutopilotPipeline()
-    result = pipeline.run(topic=topic, format_type=format_type, upload_to_youtube=upload)
-    click.echo("✅ Video Production Complete!")
+    result = pipeline.run(topic=topic, format_type=format_type, genre=genre, upload_to_youtube=upload)
+    click.echo("✅ Production Complete!")
     click.echo(f"📁 Video Path: {result['video_path']}")
     click.echo(f"🎬 Title: {result['title']}")
+    click.echo(f"🏷️ Hook Overlay: {result.get('hook_overlay')}")
     if result.get("upload"):
         up = result["upload"]
-        click.echo(f"📡 YouTube Status: {up.get('status')} | {up.get('message', '')}")
+        click.echo(f"📡 YouTube Status: {up.get('status')}")
         if up.get("url"):
             click.echo(f"🔗 YouTube URL: {up.get('url')}")
 
 @cli.command()
-@click.option("--manifest", "-m", required=True, type=click.Path(exists=True), help="JSON or JSONL file with topics list")
-@click.option("--format", "-f", "format_type", type=click.Choice(["short", "long"]), default="short")
-def batch(manifest: str, format_type: str):
-    """Batch generate multiple videos from a JSON manifest file."""
-    path = Path(manifest)
-    with open(path, "r", encoding="utf-8") as f:
-        if path.suffix == ".jsonl":
-            topics = [json.loads(line) for line in f if line.strip()]
-        else:
-            topics = json.load(f)
+@click.option("--topic", "-t", required=True, help="Topic to enqueue")
+@click.option(
+    "--genre", "-g",
+    type=click.Choice(["explainer", "action", "drama", "thriller", "motivational", "mystery", "comedy", "Let the director decide"]),
+    default="explainer"
+)
+def enqueue(topic: str, genre: str):
+    """Add a new topic to the processing queue."""
+    tq = TopicQueue()
+    row_id = tq.enqueue(topic=topic, genre=genre, source="cli")
+    click.echo(f"📥 Enqueued topic #{row_id}: '{topic}' [{genre}]")
 
-    click.echo(f"📋 Starting batch processing for {len(topics)} topics...")
+@cli.command("list-queue")
+def list_queue():
+    """List all topics in the queue with their current status."""
+    tq = TopicQueue()
+    items = tq.list_queue()
+    if not items:
+        click.echo("Queue is empty.")
+        return
+    click.echo(f"\n{'ID':<5} {'STATUS':<18} {'GENRE':<12} {'TOPIC':<35} {'YOUTUBE ID'}")
+    click.echo("-" * 80)
+    for it in items:
+        click.echo(f"{it['id']:<5} {it['status']:<18} {it['genre']:<12} {it['topic'][:32]:<35} {it.get('youtube_video_id', '')}")
+
+@cli.command("process-queue")
+@click.option("--max-items", "-m", default=1, type=int, help="Maximum number of queued topics to process")
+def process_queue(max_items: int):
+    """Process pending topics from the queue sequentially."""
+    tq = TopicQueue()
     pipeline = VideoAutopilotPipeline()
-    for i, item in enumerate(topics, 1):
-        topic = item if isinstance(item, str) else item.get("topic")
-        fmt = item.get("format", format_type) if isinstance(item, dict) else format_type
-        click.echo(f"\n--- [{i}/{len(topics)}] Processing: '{topic}' [{fmt}] ---")
+    processed = 0
+
+    while processed < max_items:
+        job = tq.get_next_queued()
+        if not job:
+            click.echo("🏁 No more queued topics to process.")
+            break
+
+        row_id = job["id"]
+        topic = job["topic"]
+        genre = job.get("genre", "explainer")
+        click.echo(f"\n▶️ Processing Job #{row_id}: '{topic}' [{genre}]...")
+
+        tq.mark_processing(row_id)
         try:
-            res = pipeline.run(topic=topic, format_type=fmt, upload_to_youtube=True)
-            click.echo(f"✅ Success: {res['title']} -> {res['video_path']}")
+            res = pipeline.run(topic=topic, format_type="short", genre=genre, upload_to_youtube=True)
+            video_id = res.get("upload", {}).get("video_id", "")
+            tq.mark_uploaded(row_id, res["title"], video_id, res["video_path"])
+            click.echo(f"✅ Job #{row_id} uploaded successfully! YouTube ID: {video_id}")
+            processed += 1
         except Exception as e:
-            click.echo(f"❌ Failed for topic '{topic}': {e}")
+            tq.mark_failed(row_id, str(e))
+            click.echo(f"❌ Job #{row_id} failed: {e}")
 
 if __name__ == "__main__":
     cli()

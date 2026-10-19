@@ -1,0 +1,42 @@
+{
+  "name": "Hinglish Tech Shorts Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "New Hinglish Tech Short",
+        "formDescription": "Give a topic and the pipeline will research, script, voice, render and upload it to YouTube as a Private video for your review.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Topic",
+              "fieldName": "topic",
+              "placeholder": "e.g. Best budget 5G phone under 15,000 this month",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Genre",
+              "fieldType": "dropdown",
+              "fieldName": "genre",
+              "defaultValue": "Let the director decide",
+              "fieldOptions": {
+                "values": [
+                  { "option": "Let the director decide" },
+                  { "option": "explainer" },
+                  { "option": "action" },
+                  { "option": "drama" },
+                  { "option": "thriller" },
+                  { "option": "motivational" },
+                  { "option": "mystery" },
+                  { "option": "comedy" }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "e8e1a100-4c64-4eb9-89e1-16f620b754c8",
+      "name": "New Short Topic Form",
+      "type": "n8n-nodes-base.formTrigger"
+    }
+  ]
+}

@@ -1,8 +1,10 @@
 import asyncio
 import os
 import logging
+import base64
+import requests
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import edge_tts
 from config.settings import config
 
@@ -10,34 +12,71 @@ logger = logging.getLogger(__name__)
 
 class VoiceSynthesizer:
     def __init__(self, voice: Optional[str] = None, speed_factor: Optional[float] = None):
-        self.voice = voice or config.voice.edge_voice
+        # Default to Indian Hindi/Hinglish energetic narrator
+        self.voice = voice or os.getenv("DEFAULT_VOICE", "hi-IN-MadhurNeural")
         self.speed_factor = speed_factor or config.voice.speed_factor
-        self.reference_sample = config.voice.custom_voice_sample
+        self.sarvam_api_key = os.getenv("SARVAM_API_KEY")
 
-    def synthesize(self, text: str, output_path: str) -> Dict[str, Any]:
+    def synthesize(self, text: str, output_path: str, pace: float = 1.05) -> Dict[str, Any]:
         """
-        Synthesizes text into high quality speech audio file.
-        Returns metadata including duration, file path, and word boundaries if available.
+        Synthesizes Hinglish / English script text into clear broadcast-quality audio.
+        Supports Sarvam AI (speaker: shubh) and zero-cost Indian Neural Edge-TTS (hi-IN-MadhurNeural).
         """
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Check if user has an ElevenLabs voice cloning API key configured
-        eleven_api_key = os.getenv("ELEVENLABS_API_KEY")
-        eleven_voice_id = os.getenv("ELEVENLABS_VOICE_ID")
-        if eleven_api_key and eleven_voice_id:
+
+        # 1. Try Sarvam AI if API key is provided
+        if self.sarvam_api_key:
             try:
-                return self._synthesize_elevenlabs(text, output_file, eleven_api_key, eleven_voice_id)
+                logger.info("Synthesizing Hinglish voice via Sarvam AI (bulbul:v3, speaker: shubh)...")
+                return self._synthesize_sarvam(text, output_file, pace=pace)
             except Exception as e:
-                logger.warning(f"Voice cloning via ElevenLabs failed: {e}. Falling back to Neural Edge-TTS...")
+                logger.warning(f"Sarvam AI TTS failed: {e}. Falling back to Indian Neural Edge-TTS...")
 
-        # Fast, zero-cost high-fidelity neural synthesis (Edge-TTS)
-        return asyncio.run(self._synthesize_edge_tts(text, output_file))
+        # 2. Fast Zero-Cost Neural Edge-TTS (hi-IN-MadhurNeural)
+        return asyncio.run(self._synthesize_edge_tts(text, output_file, pace=pace))
 
-    async def _synthesize_edge_tts(self, text: str, output_file: Path) -> Dict[str, Any]:
-        rate_str = f"+{int((self.speed_factor - 1.0) * 100)}%" if self.speed_factor >= 1.0 else f"-{int((1.0 - self.speed_factor) * 100)}%"
-        communicate = edge_tts.Communicate(text, self.voice, rate=rate_str)
+    def _synthesize_sarvam(self, text: str, output_file: Path, pace: float) -> Dict[str, Any]:
+        url = "https://api.sarvam.ai/text-to-speech"
+        headers = {
+            "Content-Type": "application/json",
+            "api-subscription-key": self.sarvam_api_key
+        }
+        payload = {
+            "text": text,
+            "language_code": "hi-IN",
+            "model": "bulbul:v3",
+            "speaker": "shubh",
+            "pace": pace,
+            "speech_sample_rate": 44100,
+            "output_audio_codec": "mp3"
+        }
+        res = requests.post(url, json=payload, headers=headers, timeout=60)
+        res.raise_for_status()
+        data = res.json()
         
+        audios = data.get("audios", [])
+        if not audios:
+            raise ValueError("Sarvam AI returned empty audio response")
+            
+        audio_bytes = base64.b64decode("".join(audios))
+        with open(output_file, "wb") as f:
+            f.write(audio_bytes)
+
+        return {
+            "audio_path": str(output_file),
+            "engine": "sarvam-ai",
+            "speaker": "shubh",
+            "has_subtitles": False
+        }
+
+    async def _synthesize_edge_tts(self, text: str, output_file: Path, pace: float) -> Dict[str, Any]:
+        # Speed adjustment
+        effective_pace = pace * self.speed_factor
+        rate_int = int((effective_pace - 1.0) * 100)
+        rate_str = f"+{rate_int}%" if rate_int >= 0 else f"{rate_int}%"
+        
+        communicate = edge_tts.Communicate(text, self.voice, rate=rate_str)
         submaker = edge_tts.SubMaker()
         with open(output_file, "wb") as file:
             async for chunk in communicate.stream():
@@ -45,39 +84,11 @@ class VoiceSynthesizer:
                     file.write(chunk["data"])
                 elif chunk["type"] == "WordBoundary":
                     submaker.feed(chunk)
-                    
+
         return {
             "audio_path": str(output_file),
             "engine": "edge-tts",
             "voice": self.voice,
             "has_subtitles": True,
             "submaker": submaker
-        }
-
-    def _synthesize_elevenlabs(self, text: str, output_file: Path, api_key: str, voice_id: str) -> Dict[str, Any]:
-        import requests
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-        headers = {
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-            "xi-api-key": api_key
-        }
-        data = {
-            "text": text,
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.8
-            }
-        }
-        response = requests.post(url, json=data, headers=headers, timeout=60)
-        response.raise_for_status()
-        with open(output_file, "wb") as f:
-            f.write(response.content)
-            
-        return {
-            "audio_path": str(output_file),
-            "engine": "elevenlabs-voice-clone",
-            "voice_id": voice_id,
-            "has_subtitles": False
         }

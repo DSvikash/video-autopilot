@@ -29,3 +29,4 @@ oauth_credentials.json
 # Temporary / Log files
 *.log
 .pytest_cache/
+*.db
