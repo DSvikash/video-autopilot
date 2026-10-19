@@ -1,0 +1,31 @@
+# Environments & Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Media & Storage Cache
+output/
+data/cache/
+*.mp4
+*.m4v
+*.wav
+*.mp3
+!data/voice_samples/*.m4a
+!data/voice_samples/*.wav
+!data/background_music/*.mp3
+
+# Credentials & OAuth Tokens
+client_secrets.json
+token.json
+oauth_credentials.json
+
+# Temporary / Log files
+*.log
+.pytest_cache/
