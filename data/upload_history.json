@@ -1,11 +1,16 @@
 {
   "date": "2026-10-20",
-  "count": 1,
+  "count": 2,
   "uploads": [
     {
       "video_id": "4bb__EPh2FE",
       "title": "OpenAI GPT-6 Intelligent UI & The Death of Traditional Apps: We Tested It (+Top AI Breakthroughs Exp",
       "timestamp": "2026-10-20T12:59:52.217717"
+    },
+    {
+      "video_id": "GsQsRvgPWbk",
+      "title": "The Rise of Persistent AI Agents: We Tested It (+Top AI Breakthroughs Explained)",
+      "timestamp": "2026-10-20T13:24:50.356642"
     }
   ]
 }
