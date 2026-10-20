@@ -15,6 +15,7 @@ from moviepy import (
 from config.settings import config
 from src.studio.models import DocumentaryScript, Chapter, Slide
 from src.studio.visual_deck import VisualDeckGenerator
+from src.studio.thumbnail_generator import ThumbnailGenerator
 from src.voice.synthesizer import VoiceSynthesizer
 from src.mastering.audio_processor import AudioMasterer
 from src.safety.compliance_gate import ComplianceGate
@@ -28,14 +29,18 @@ class StudioComposer:
     Produces high-retention 1920x1080 tech explainer videos with:
     - Multi-chapter structure & automatic YouTube timestamps
     - Sleek dark-mode technical visual decks & stat cards
+    - High-CTR 1280x720 custom thumbnail generation & YouTube attachment
+    - Subtle ambient documentary background score ducked at -22 dB
     - Confident, articulate narrator voice
     - -14 LUFS broadcast audio mastering
     """
     def __init__(self):
         self.deck_generator = VisualDeckGenerator(output_dir=config.base_dir / "output" / "slides")
+        self.thumb_generator = ThumbnailGenerator(output_dir=config.base_dir / "output" / "thumbnails")
         self.voice_syn = VoiceSynthesizer(voice="en-US-ChristopherNeural", speed_factor=1.0)
         self.audio_masterer = AudioMasterer()
         self.uploader = YouTubeUploader()
+        self.bg_music_file = config.base_dir / "data" / "background_music" / "ambient_tech.mp3"
         self.width = 1920
         self.height = 1080
         self.fps = 30
@@ -58,9 +63,8 @@ class StudioComposer:
         
         current_time_offset = 0.0
 
-        # Iterate through chapters and slides
+        # 1. Iterate through chapters and slides
         for ch_idx, chapter in enumerate(script.chapters, 1):
-            # Calculate timestamp string (MM:SS)
             mins = int(current_time_offset // 60)
             secs = int(current_time_offset % 60)
             chapter.timestamp_str = f"{mins:02d}:{secs:02d}"
@@ -69,15 +73,13 @@ class StudioComposer:
             logger.info(f"Producing Chapter {ch_idx}/{total_chapters}: '{chapter.title}' at {chapter.timestamp_str}")
 
             for slide in chapter.slides:
-                # 1. Synthesize narration audio for this slide
                 slide_audio_path = session_dir / f"audio_ch{ch_idx}_{slide.slide_id}.mp3"
                 self.voice_syn.synthesize(slide.narration, str(slide_audio_path))
                 
                 audio_clip = AudioFileClip(str(slide_audio_path))
-                slide_duration = audio_clip.duration + 0.6  # Add subtle natural breathing pause
+                slide_duration = audio_clip.duration + 0.6
                 current_time_offset += slide_duration
 
-                # 2. Render 1920x1080 visual deck card
                 slide_img_path = self.deck_generator.generate_slide_image(
                     slide=slide,
                     chapter_title=chapter.title,
@@ -85,10 +87,8 @@ class StudioComposer:
                     total_chapters=total_chapters
                 )
 
-                # 3. Create video clip for this slide
                 img_clip = ImageClip(slide_img_path).with_duration(slide_duration)
                 
-                # Add subtle animated zoom (Ken Burns)
                 def subtle_zoom(t):
                     return 1.0 + 0.04 * (t / slide_duration)
                 
@@ -97,12 +97,11 @@ class StudioComposer:
                 except Exception:
                     pass
 
-                # Set audio
                 img_clip = img_clip.with_audio(audio_clip)
                 timeline_clips.append(img_clip)
                 audio_clips.append(audio_clip)
 
-        # 4. Concatenate full video timeline
+        # 2. Concatenate full video timeline
         logger.info(f"Concatenating {len(timeline_clips)} documentary slides into full master...")
         final_video = concatenate_videoclips(timeline_clips, method="compose")
         total_duration = final_video.duration
@@ -118,40 +117,60 @@ class StudioComposer:
             logger=None
         )
 
-        # 5. Broadcast Audio Mastering (-14 LUFS)
-        logger.info("Applying broadcast-grade -14 LUFS dialogue mastering to complete documentary...")
+        # 3. Master dialogue and mix with ambient tech background music
+        logger.info("Applying broadcast-grade -14 LUFS mastering + subtle ambient music...")
         mastered_output_path = session_dir / f"{session_id}_final_1080p.mp4"
-        
-        # Extract audio, master it, remux with video
         temp_audio = session_dir / "extracted_audio.wav"
-        mastered_audio = session_dir / "mastered_audio.wav"
+        mixed_audio = session_dir / "mastered_mixed_audio.wav"
         
         os.system(f"ffmpeg -y -i '{raw_output_path}' -vn -ar 48000 -ac 2 '{temp_audio}' >/dev/null 2>&1")
-        self.audio_masterer.master_dialogue(str(temp_audio), str(mastered_audio))
-        os.system(f"ffmpeg -y -i '{raw_output_path}' -i '{mastered_audio}' -c:v copy -c:a aac -b:a 192k -map 0:v:0 -map 1:a:0 '{mastered_output_path}' >/dev/null 2>&1")
+        
+        # Mix with ambient tech score ducked at -22 dB
+        music_path = str(self.bg_music_file) if self.bg_music_file.exists() else None
+        self.audio_masterer.mix_voice_and_music(
+            voice_path=str(temp_audio),
+            output_path=str(mixed_audio),
+            music_path=music_path,
+            music_volume=0.08  # Soft, ambient background
+        )
+        
+        # Remux video with mastered mixed audio
+        os.system(f"ffmpeg -y -i '{raw_output_path}' -i '{mixed_audio}' -c:v copy -c:a aac -b:a 192k -map 0:v:0 -map 1:a:0 '{mastered_output_path}' >/dev/null 2>&1")
 
         if raw_output_path.exists():
             raw_output_path.unlink()
 
-        # Clean up moviepy memory
         for c in timeline_clips:
             c.close()
         for a in audio_clips:
             a.close()
         final_video.close()
 
-        # 6. Generate YouTube Description with Timestamps
+        # 4. Generate High-CTR YouTube Thumbnail
+        logger.info("Generating high-CTR 1280x720 YouTube custom thumbnail...")
+        thumbnail_file = session_dir / "thumbnail.jpg"
+        self.thumb_generator.generate_thumbnail(
+            topic=script.topic,
+            highlight_badge="WE TESTED IT!",
+            secondary_badge="+10 AI UPDATES",
+            output_filename=str(thumbnail_file.name)
+        )
+        # Move generated thumbnail to session dir if needed
+        default_thumb = self.thumb_generator.output_dir / thumbnail_file.name
+        if default_thumb.exists() and default_thumb != thumbnail_file:
+            os.system(f"cp '{default_thumb}' '{thumbnail_file}'")
+
+        # 5. Generate YouTube Description with Timestamps
         full_description = script.get_youtube_description_with_timestamps()
         meta_file = session_dir / "youtube_metadata.txt"
         with open(meta_file, "w") as f:
             f.write(f"TITLE:\n{script.title}\n\nDESCRIPTION:\n{full_description}\n\nTAGS:\n{', '.join(script.tags)}")
 
-        # 7. Upload to YouTube if requested
+        # 6. Upload to YouTube with Custom Thumbnail and Chapters
         upload_result = None
         if upload_to_youtube:
-            logger.info("Uploading High-Value Long-Form Documentary to YouTube...")
-            # Wrap script into standard structure for uploader
-            from src.scripting.models import VideoScript, Scene
+            logger.info("Uploading High-Value Long-Form Documentary + Custom Thumbnail to YouTube...")
+            from src.scripting.models import VideoScript
             compat_script = VideoScript(
                 topic=script.topic,
                 format_type="long",
@@ -163,7 +182,11 @@ class StudioComposer:
                 estimated_total_duration=total_duration,
                 scenes=[]
             )
-            upload_result = self.uploader.upload_video(str(mastered_output_path), compat_script)
+            upload_result = self.uploader.upload_video(
+                video_path=str(mastered_output_path),
+                script=compat_script,
+                thumbnail_path=str(thumbnail_file) if thumbnail_file.exists() else None
+            )
 
         elapsed = time.time() - start_time
         logger.info(f"=== Documentary Production Complete in {elapsed:.1f}s ===")
@@ -171,6 +194,7 @@ class StudioComposer:
         return {
             "status": "success",
             "video_path": str(mastered_output_path),
+            "thumbnail_path": str(thumbnail_file),
             "title": script.title,
             "duration": total_duration,
             "chapters": [ch.model_dump() for ch in script.chapters],

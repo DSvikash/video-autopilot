@@ -101,11 +101,11 @@ class YouTubeUploader:
         self,
         video_path: str,
         script: VideoScript,
-        privacy_status: Optional[str] = None
+        privacy_status: Optional[str] = None,
+        thumbnail_path: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Executes resumable chunked upload with synthetic media policy compliance.
-        If credentials are not yet configured, queues payload in output/pending_uploads/.
+        Executes resumable chunked upload with synthetic media policy compliance and optional custom thumbnail.
         """
         if not self.can_upload_today():
             raise RuntimeError(f"Daily upload quota reached ({self.daily_limit} videos today).")
@@ -171,10 +171,23 @@ class YouTubeUploader:
         logger.info(f"Upload succeeded! Video ID: {video_id}")
         self.record_upload(video_id, script.title)
 
+        # Set custom thumbnail if provided
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            try:
+                logger.info(f"Uploading custom thumbnail from {thumbnail_path}...")
+                youtube.thumbnails().set(
+                    videoId=video_id,
+                    media_body=MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+                ).execute()
+                logger.info("Custom thumbnail set successfully!")
+            except Exception as e:
+                logger.warning(f"Setting custom thumbnail failed (channel may need phone verification): {e}")
+
         return {
             "status": "published",
             "video_id": video_id,
             "url": f"https://youtu.be/{video_id}",
             "privacyStatus": privacy,
+            "thumbnail_path": thumbnail_path,
             "response": response
         }
